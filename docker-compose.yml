@@ -1,0 +1,45 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: spot4u
+      POSTGRES_USER: spot4u
+      POSTGRES_PASSWORD: spot4u
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U spot4u -d spot4u"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  importer:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://spot4u:spot4u@db:5432/spot4u
+    volumes:
+      - ./Data/leningradsky.xlsx:/data/leningradsky.xlsx:ro
+      - ./Data/veshnyakovsky.xlsx:/data/veshnyakovsky.xlsx:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["python", "-m", "app.import_data", "--leningradsky", "/data/leningradsky.xlsx", "--veshnyakovsky", "/data/veshnyakovsky.xlsx"]
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://spot4u:spot4u@db:5432/spot4u
+    ports:
+      - "8000:8000"
+    depends_on:
+      importer:
+        condition: service_completed_successfully
+
+volumes:
+  postgres_data:
