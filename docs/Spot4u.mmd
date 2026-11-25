@@ -1,0 +1,234 @@
+---
+title: Spot4u · Полная схема решения
+config:
+  theme: neutral
+  flowchart:
+    htmlLabels: false
+    curve: linear
+    nodeSpacing: 28
+    rankSpacing: 48
+---
+flowchart TB
+%% Сплошная стрелка — действие, переход или передача данных.
+%% Пунктир — зависимость, настройка или условие.
+subgraph deploy["Запуск сервисов · docker-compose.yml"]
+    compose["Docker Compose"] --> pgStart["db · PostgreSQL 16 на порту 5432"]
+    pgStart --> ready["pg_isready подтверждает готовность"]
+    ready --> importJob["Одноразовый контейнер importer"]
+    importJob -->|"успешное завершение"| apiStart["Контейнер api · Uvicorn на порту 8000"]
+    image["backend/Dockerfile · Python 3.13 и requirements.txt"] -.-> importJob
+    image -.-> apiStart
+    schema["backend/schema.sql · создать таблицы и индекс при отсутствии"]
+    volume[("Том postgres_data сохраняет базу при остановке")]
+    pgStart --- volume
+end
+
+subgraph ingest["Каталог · backend/app/import_data.py"]
+    lenBook["Data/leningradsky.xlsx · 73 места"]
+    vesBook["Data/veshnyakovsky.xlsx · 31 место"]
+    lenBook --> load["openpyxl читает обе книги только для чтения"]
+    vesBook --> load
+    load --> header["Проверить единственный лист places и порядок 20 столбцов"]
+    header --> values["Очистить пробелы, привести числа, даты и флаги"]
+    values --> validate["Проверить обязательные поля, уникальность ID в корпусе, координаты, рейтинг, категории и способ пути"]
+    validate -->|"две книги и ожидаемое число строк"| transaction["Одна транзакция для обоих корпусов"]
+    validate -->|"ошибка входных данных"| reject["Импорт завершается с ошибкой до обновления каталога"]
+    transaction --> upsert["Добавить или обновить корпуса и места по ключу"]
+    upsert --> prune["Удалить для корпуса места, исчезнувшие из новой книги"]
+end
+importJob --> load
+importJob -.-> schema
+apiStart -.-> schema
+
+subgraph storage["PostgreSQL · backend/app/database.py"]
+    campuses[("campuses · id, название, адрес и координаты")]
+    places[("places · ключ из campus_id и place_id")]
+    columns["Данные места: название, категория, адрес, координаты, часы, рейтинг и отзывы, средний чек, четыре удобства, сайт, телефон, источник, дата данных, минуты и способ пути"]
+    idx["Индекс по campus_id и category · ограничения CHECK и внешний ключ"]
+    places --- columns
+    campuses ---|"один корпус — много мест"| places
+    places --- idx
+end
+schema -.-> campuses & places
+volume -.-> places
+upsert --> campuses & places
+prune --> places
+
+subgraph builds["Клиенты и ручная сборка"]
+    code["mobile/lib/main.dart · общий код Flutter"]
+    android["Android · Gradle, отладочный APK, эмулятор или телефон"]
+    ios["iOS · проект Xcode, симулятор или подписанная сборка"]
+    buildWeb["scripts/build_web.py · Flutter web release, хеши имён и локальный CanvasKit"]
+    dist["mobile/build/web · index, bootstrap, JS, WASM, шрифты Onest и Material, иконки и заставки"]
+    pack["Скрипт записывает версию кеша в sw.js и создаёт gzip-копии ресурсов"]
+    preview["scripts/serve_preview.py · HTTP на порту 3000"]
+    browser["Браузер или PWA с домашнего экрана"]
+    code --> android & ios & buildWeb
+    buildWeb --> pack --> dist --> preview -->|"страница и ресурсы"| browser
+end
+
+subgraph offline["Запуск веб-версии и повторное открытие"]
+    indexPage["index.html показывает заставку и запускает flutter_bootstrap.js"]
+    engine["Загружаются приложение, движок и шрифты. Flutter рисует первый экран"]
+    register["Страница регистрирует sw.js"]
+    install["Установка: кеш оболочки и bootstrap, затем precache_manifest.json и файлы подходящего движка"]
+    cache[("Cache Storage · версия spot4u-static с хешем сборки")]
+    activate["Активация: удалить прежние кеши и взять вкладки под управление"]
+    update["Если у страницы уже был контроллер, при его смене страница перезагружается"]
+    navigation["Страница и bootstrap: сначала сеть, при сбое копия из кеша"]
+    resources["Остальные локальные файлы: сначала кеш, затем сеть"]
+    online["API и health идут в сеть. Без связи новый поиск вернёт ошибку"]
+    indexPage --> engine
+    indexPage --> register --> install --> cache
+    install --> activate --> update
+    activate --> navigation & resources & online
+    cache -.-> navigation & resources
+end
+browser --> indexPage
+
+subgraph client["Главная и состояние приложения · controller.dart"]
+    start["Spot4uApp создаёт контроллер и запускает обновление корпусов"]
+    home["S1 · Главная: Ленинградский корпус, категории пусты, приоритет сбалансированный"]
+    defaults["Сразу доступны два встроенных корпуса. При ошибке обновления выбор остаётся доступным"]
+    category["Категории: кафе, кофейни, библиотеки, коворкинги, антикафе"]
+    inlineFilters["S1a · Фильтры главной меняют текущие условия"]
+    sliders["Чек 0–2000 ₽ и путь 5–60 мин. В крайнем правом положении предел снят"]
+    criteria["SearchCriteria · корпус, категории, приоритет и SearchFilters"]
+    guard["Кнопка поиска доступна при выборе категории. Второй поиск во время загрузки блокируется"]
+    waiting["S5 · Загрузка. Контроллер запоминает номер запроса и запрошенный вид"]
+    start --> home & defaults
+    home --> category & inlineFilters
+    inlineFilters --> sliders
+    category --> criteria
+    sliders --> criteria
+    criteria --> guard --> waiting
+end
+android & ios & engine --> start
+
+subgraph transport["Как запрос доходит до сервера"]
+    httpClient["HttpSpot4uApi · JSON по HTTP, тайм-аут клиента 15 с"]
+    native["Android-эмулятор: 10.0.2.2:8000 · iOS-симулятор: localhost:8000"]
+    configUrl["SPOT4U_API_URL переопределяет адрес, в том числе для телефона"]
+    proxy["Веб: API на том же домене. Preview пересылает /api/ и /health на 127.0.0.1:8000"]
+    gateway["FastAPI · backend/app/api.py"]
+    httpClient -->|"нативный клиент"| native --> gateway
+    configUrl -.-> httpClient
+    httpClient -->|"веб-клиент"| proxy --> gateway
+end
+preview -.-> proxy
+apiStart --> gateway
+start -->|"загрузить корпуса"| httpClient
+waiting -->|"отправить критерии"| httpClient
+online -.-> proxy
+
+subgraph contract["Адреса API и проверка запроса"]
+    info["GET / · сведения о сервисе. GET /docs и /openapi.json · контракт"]
+    health["GET /health · проверка соединения с PostgreSQL"]
+    status["200 ok или 503 unavailable"]
+    getCampuses["GET /api/v1/campuses · список корпусов и координат"]
+    campusList["Контроллер обновляет список и сохраняет выбранный ID, если он доступен"]
+    postSearch["POST /api/v1/search · Pydantic проверяет SearchRequest"]
+    validInput["Нужны origin_id и 1–5 разных категорий. Фильтры необязательны. По умолчанию balanced"]
+    limits["API принимает чек 0–100000 и путь 0–1440. null снимает предел"]
+    invalid["422 · ошибка значений или структуры запроса"]
+    origin["Найти корпус по origin_id"]
+    missing["404 · корпус отсутствует"]
+    query["SQL: выбрать места корпуса только из указанных категорий"]
+    gateway --> info & health & getCampuses & postSearch
+    health --> status
+    getCampuses --> campusList
+    postSearch --> validInput
+    limits -.-> validInput
+    validInput -->|"не прошёл проверку"| invalid
+    validInput -->|"прошёл"| origin
+    origin -->|"не найден"| missing
+    origin -->|"найден"| query
+end
+campuses --> getCampuses & origin
+places --> query
+campusList --> home
+
+subgraph ranking["Поиск · search.py и opening_hours.py"]
+    hours["Для каждого места разобрать расписание на сегодня и вчера в часовом поясе Москвы"]
+    state["Учесть интервалы через полночь, выходные и пропуски. Статус: открыто, закрыто или неизвестно"]
+    flags["Активные Wi-Fi, розетки, ноутбук и скидка требуют значения yes"]
+    openNow["Фильтр «Открыто сейчас» пропускает только подтверждённо открытые места"]
+    maxLimits["Активный предел требует известного чека или времени не выше лимита"]
+    passed["Оставить места, которые удовлетворяют всем выбранным условиям"]
+    score["StudyScore от 0 до 100 · округлить до сотых"]
+    timeCost["Время: 30% × доля от 1 − минут/60. Чек: 25% × доля от 1 − рублей/1000. Доли ограничены интервалом 0–1"]
+    amenities["Розетки 20%, Wi-Fi 15%. Да = 1, нет = 0. Для неизвестного признака — 0,5"]
+    rating["Рейтинг 10%. Сгладить 20 условными отзывами на 4,0, затем перевести со шкалы 1–5 на 0–1"]
+    priority{"Какой приоритет выбран?"}
+    balanced["Сбалансированно · балл по убыванию"]
+    nearest["Поближе · минуты по возрастанию"]
+    cheapest["Подешевле · чек по возрастанию"]
+    sorted["При равенстве решает place_id. Неизвестная цена или время идут в конец соответствующей сортировки"]
+    response["200 · SearchResponse: origin, priority, count, places. Для места добавлены open_status и study_score"]
+    hours --> state --> passed
+    flags & openNow & maxLimits -.-> passed
+    passed --> score
+    timeCost & amenities & rating -.-> score
+    score --> priority
+    priority --> balanced & nearest & cheapest
+    balanced & nearest & cheapest --> sorted --> response
+end
+query --> hours
+criteria -.-> postSearch
+
+subgraph results["Результат, повторный поиск и возврат"]
+    receive["Контроллер принимает результат только для актуального номера запроса"]
+    outcome{"Сколько мест вернул сервер?"}
+    success["Есть места · один SearchResult хранится для списка и карты"]
+    empty["S6 · Пустая выдача. Можно изменить условия или вернуться на главную"]
+    errorScreen["S7 · Ошибка сети, тайм-аут или неуспешный ответ. Показать сообщение и «Обновить»"]
+    retry["Повторить последние подтверждённые условия"]
+    sheet["S4 · Окно фильтров. Отдельная копия категорий, условий и приоритета"]
+    reset["«Сбросить» очищает дополнительные фильтры в черновике"]
+    cancel["Крестик или системный возврат отбрасывает черновик и открывает прежний экран"]
+    apply["Применить при непустом выборе категорий. С карты вернуться к карте, из списка или пустой выдачи — к списку"]
+    back["Назад на главную: сохранить критерии, сбросить выбранную карточку и аннулировать старый запрос"]
+    receive --> outcome
+    outcome -->|"больше нуля"| success
+    outcome -->|"ноль"| empty
+    empty & success -->|"Фильтры"| sheet
+    sheet --> reset --> sheet
+    sheet --> cancel & apply
+    errorScreen --> retry
+    empty & success & errorScreen --> back
+end
+response --> receive
+invalid & missing --> errorScreen
+httpClient -->|"сбой или тайм-аут"| errorScreen
+retry & apply --> waiting
+back --> home
+
+subgraph display["Список, карта и внешние действия"]
+    listView["S2 · Список с количеством мест, оценкой и карточками"]
+    expanded["S2b · Подробности одного места. Повторное нажатие сворачивает карточку"]
+    mapView["S3 · flutter_map показывает корпус и маркеры мест"]
+    tiles["Тайлы карты · tile.openstreetmap.org"]
+    selected["S3a · Выбор маркера открывает нижнюю карточку"]
+    fullCard["S3b · Нажатие или свайп раскрывает подробности"]
+    details["Цена, удобства, скидка, статус, расписание, рейтинг, StudyScore и время пути из каталога"]
+    action["url_launcher открывает внешнее приложение по нажатию"]
+    yandex["Яндекс Карты: rtext соединяет координаты корпуса и места. Пешком — pd, метро — mt"]
+    site["Сайт заведения, если указан"]
+    phoneLink["Телефон через tel:, если указан"]
+    launchFail["Если ссылка не открылась, показать сообщение"]
+    success --> listView & mapView
+    listView <-->|"переключить вид без нового поиска"| mapView
+    listView --> expanded --> details
+    tiles --> mapView --> selected --> fullCard --> details
+    details --> action --> yandex & site & phoneLink
+    action -->|"ошибка открытия"| launchFail
+end
+
+classDef storageNode fill:#e3f3ef,stroke:#467b69,color:#122f27;
+classDef serviceNode fill:#e7efff,stroke:#506aab,color:#172849;
+classDef actionNode fill:#eff3e1,stroke:#77884b,color:#303b1c;
+classDef exceptionNode fill:#fbebe7,stroke:#b06a59,color:#532e27;
+class campuses,places,volume,cache,lenBook,vesBook storageNode;
+class compose,apiStart,gateway,httpClient,preview,postSearch,score serviceNode;
+class start,home,criteria,success,listView,mapView,details,yandex actionNode;
+class reject,invalid,missing,errorScreen,empty,launchFail exceptionNode;
