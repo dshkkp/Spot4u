@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <base href="$FLUTTER_BASE_HREF">
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="description" content="Места для учёбы и работы рядом с корпусами Финансового университета.">
+  <meta name="theme-color" content="#304CC9">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Spot4u">
+  <link rel="apple-touch-icon" href="icons/Icon-180.png">
+  <link rel="apple-touch-startup-image" href="splash/splash-1170x2532.png" media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+  <link rel="apple-touch-startup-image" href="splash/splash-1179x2556.png" media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+  <link rel="apple-touch-startup-image" href="splash/splash-1125x2436.png" media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+  <link rel="apple-touch-startup-image" href="splash/splash-1242x2688.png" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+  <link rel="apple-touch-startup-image" href="splash/splash-1284x2778.png" media="(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+  <link rel="apple-touch-startup-image" href="splash/splash-1290x2796.png" media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+  <link rel="apple-touch-startup-image" href="splash/splash-750x1334.png" media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="manifest" href="manifest.json">
+  <title>Spot4u</title>
+  <style>
+    body { margin: 0; background: #304CC9; }
+    #spot4u-loading { position: fixed; inset: 0; z-index: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; color: white; font: 600 16px Arial, sans-serif; background: radial-gradient(circle at 85% 0%, #91A667 0%, #B16D83 32%, #304CC9 70%, #1B35AB 100%); }
+    #spot4u-loading strong { font-size: 28px; }
+    #spot4u-loading span { width: 36px; height: 36px; border: 4px solid #ffffff55; border-top-color: #D5F477; border-radius: 50%; animation: spot4u-spin 0.8s linear infinite; }
+    flt-glass-pane { position: fixed !important; inset: 0; z-index: 1; }
+    @keyframes spot4u-spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div id="spot4u-loading" role="status"><strong>Spot4u</strong><span></span>Загружаем…</div>
+  <script>
+    const hadController = 'serviceWorker' in navigator && Boolean(navigator.serviceWorker.controller);
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (hadController) window.location.reload();
+      });
+      navigator.serviceWorker.register('sw.js');
+    }
+  </script>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>
